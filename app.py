@@ -73,7 +73,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Database Path
-DB_PATH = os.path.join(os.path.dirname(__file__), '../database/tracker_data.db')
+DB_PATH = os.path.join(os.path.dirname(__file__), 'tracker_data.db')
 
 def load_data(query):
     if not os.path.exists(DB_PATH):
