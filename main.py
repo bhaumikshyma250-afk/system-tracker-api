@@ -7,7 +7,7 @@ import os
 app = FastAPI(title="System Tracker API")
 
 # আপনার মূল ডাটাবেসের পাথ
-DB_PATH = os.path.join(os.path.dirname(__file__), '../database/tracker_data.db')
+DB_PATH = os.path.join(os.path.dirname(__file__), 'tracker_data.db')
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
