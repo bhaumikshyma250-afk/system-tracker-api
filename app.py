@@ -1,248 +1,325 @@
-# dashboard/app.py
-
-import streamlit as st
-import pandas as pd
-import sqlite3
 import os
-import plotly.express as px
-from streamlit_autorefresh import st_autorefresh
+import sqlite3
 import time
-import psutil
 
-# Page Configuration
-st.set_page_config(
-    page_title="AuraMonitor System Tracker",
-    page_icon="🚀",
-    layout="wide"
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import psutil
+import streamlit as st
+from streamlit_autorefresh import st_autorefresh
+
+# ---------------------------------------------------------------- page setup
+st.set_page_config(page_title="Laptop Logbook", page_icon="📓", layout="wide")
+st_autorefresh(interval=5000, limit=None, key="datarefresh")
+
+# Palette
+PAPER = "#EAF0EC"
+GRID = "#CBD8D0"
+INK = "#14213D"
+MUTED = "#5B6B66"
+COBALT = "#2F4BFF"
+MARK = "#FFE45C"
+CORAL = "#E5484D"
+APP_COLORS = ["#2F4BFF", "#14213D", "#E5484D", "#1F9D8A", "#8A5CF6", "#C99A06", "#6B7C93"]
+
+st.markdown(
+    f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Source+Sans+3:wght@400;600&display=swap');
+
+.stApp {{
+    background-color: {PAPER};
+    background-image:
+        linear-gradient({GRID} 1px, transparent 1px),
+        linear-gradient(90deg, {GRID} 1px, transparent 1px);
+    background-size: 28px 28px;
+    color: {INK};
+    font-family: 'Source Sans 3', sans-serif;
+}}
+header[data-testid="stHeader"], footer, #MainMenu {{ visibility: hidden; height: 0; }}
+.block-container {{ max-width: 1150px; padding-top: 2.2rem; }}
+
+h1, h2, h3, .lb-display {{
+    font-family: 'Bricolage Grotesque', sans-serif !important;
+    color: {INK} !important;
+    letter-spacing: -0.02em;
+}}
+
+/* Title */
+.lb-title {{
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-weight: 800;
+    font-size: clamp(2.4rem, 6vw, 4rem);
+    line-height: 1;
+    margin: 0;
+    color: {INK};
+}}
+.lb-title span {{
+    background: linear-gradient(transparent 55%, {MARK} 55%);
+    padding: 0 .12em;
+}}
+.lb-sub {{ color: {MUTED}; margin: .6rem 0 1.6rem; font-size: 1.05rem; max-width: 60ch; }}
+
+/* "Right now" strip */
+.lb-now {{
+    background: {INK};
+    color: {PAPER};
+    padding: 1.4rem 1.6rem;
+    border-radius: 4px 22px 4px 22px;
+    margin-bottom: 1.6rem;
+}}
+.lb-now small {{ color: #9FB0C8; font-size: .95rem; }}
+.lb-now .app {{
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-weight: 800;
+    font-size: clamp(1.8rem, 4.5vw, 2.8rem);
+    line-height: 1.1;
+    margin: .2rem 0;
+}}
+.lb-now .win {{ color: #D6DEEA; font-size: 1.05rem; overflow-wrap: anywhere; }}
+
+/* Figures row (no cards, ruled columns) */
+.lb-fig {{ border-left: 3px solid {INK}; padding: .1rem 0 .1rem .9rem; margin-bottom: 1rem; }}
+.lb-fig .n {{
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-weight: 800;
+    font-size: 2.1rem;
+    line-height: 1.1;
+    color: {INK};
+}}
+.lb-fig .l {{ color: {MUTED}; font-size: .98rem; }}
+
+/* Tabs */
+div[data-baseweb="tab-list"] {{ gap: 1.4rem; border-bottom: 2px solid {INK}; }}
+button[data-baseweb="tab"] {{
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: {MUTED};
+    background: transparent;
+    padding: .5rem 0;
+}}
+button[data-baseweb="tab"][aria-selected="true"] {{ color: {INK}; }}
+div[data-baseweb="tab-highlight"] {{ background-color: {MARK} !important; height: 6px !important; }}
+
+/* Chart + table frames */
+.lb-note {{ color: {MUTED}; font-size: .98rem; margin: -.2rem 0 .6rem; }}
+div[data-testid="stPlotlyChart"], div[data-testid="stDataFrame"] {{
+    background: rgba(255,255,255,.72);
+    border: 2px solid {INK};
+    border-radius: 4px 14px 4px 14px;
+    padding: .4rem;
+}}
+
+/* Buttons */
+.stButton > button {{
+    font-family: 'Bricolage Grotesque', sans-serif;
+    font-weight: 700;
+    border: 2px solid {INK};
+    border-radius: 4px 12px 4px 12px;
+    background: {MARK};
+    color: {INK};
+}}
+.stButton > button:hover {{ background: {INK}; color: {PAPER}; border-color: {INK}; }}
+.stButton > button:focus-visible {{ outline: 3px solid {COBALT}; outline-offset: 2px; }}
+.lb-danger {{ border-top: 2px dashed {CORAL}; margin-top: 2.2rem; padding-top: 1rem; }}
+</style>
+""",
+    unsafe_allow_html=True,
 )
 
-# Real-time auto-refresh every 2 seconds
-st_autorefresh(interval=2000, limit=None, key="datarefresh")
+# ---------------------------------------------------------------- data layer
+DB_PATH = os.path.join(os.path.dirname(__file__), "tracker_data.db")
 
-# Session State Initialization for Interactive Cards
-if 'active_view' not in st.session_state:
-    st.session_state.active_view = 'overview'
 
-# Ultra-Modern Custom CSS Styling
-st.markdown("""
-    <style>
-    .main {
-        background: #090d16;
-    }
-    .metric-card {
-        background: linear-gradient(135deg, rgba(31, 41, 55, 0.7) 0%, rgba(17, 24, 39, 0.9) 100%);
-        border: 1px solid rgba(75, 85, 99, 0.4);
-        padding: 20px;
-        border-radius: 16px;
-        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-        backdrop-filter: blur(8px);
-        text-align: center;
-        margin-bottom: 10px;
-    }
-    .metric-title {
-        font-size: 13px;
-        color: #94a3b8;
-        letter-spacing: 1px;
-        margin-bottom: 6px;
-        font-weight: 700;
-        text-transform: uppercase;
-    }
-    .metric-value {
-        font-size: 26px;
-        color: #f8fafc;
-        font-weight: 800;
-        background: linear-gradient(90deg, #818cf8, #c084fc);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }
-    /* Attractive Control Panel Box */
-    .control-panel-box {
-        background: linear-gradient(135deg, rgba(15, 23, 42, 0.8) 0%, rgba(30, 41, 59, 0.6) 100%);
-        border: 1px solid rgba(99, 102, 241, 0.3);
-        padding: 24px;
-        border-radius: 16px;
-        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-        backdrop-filter: blur(8px);
-        margin-top: 30px;
-    }
-    h1, h2, h3 {
-        color: #ffffff !important;
-        font-family: 'Segoe UI', sans-serif;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# Database Path
-DB_PATH = os.path.join(os.path.dirname(__file__), 'tracker_data.db')
-
-def load_data(query):
+def load_data(query: str) -> pd.DataFrame:
     if not os.path.exists(DB_PATH):
         return pd.DataFrame()
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql(query, conn)
-    conn.close()
-    return df
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        df = pd.read_sql(query, conn)
+        conn.close()
+        return df
+    except Exception:
+        return pd.DataFrame()
+
 
 def clear_database():
     if os.path.exists(DB_PATH):
         conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM activity_logs")
-        cursor.execute("DELETE FROM network_logs")
-        cursor.execute("DELETE FROM uptime_logs")
+        cur = conn.cursor()
+        for table in ("activity_logs", "network_logs", "uptime_logs"):
+            cur.execute(f"DELETE FROM {table}")
         conn.commit()
         conn.close()
 
-# Header Section
-st.title("🚀 AuraMonitor System Intelligence Dashboard")
-st.markdown("<p style='color: #94a3b8; font-size: 16px;'>Interactive real-time telemetry dashboard. Click the metric cards below to filter specific views.</p>", unsafe_allow_html=True)
-st.markdown("---")
 
-# Fetch Data
+def chart_layout(fig, height=360):
+    fig.update_layout(
+        height=height,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Source Sans 3, sans-serif", color=INK, size=14),
+        margin=dict(t=16, b=16, l=8, r=16),
+        legend=dict(orientation="h", y=-0.2),
+    )
+    fig.update_xaxes(showgrid=True, gridcolor=GRID, zeroline=False, linecolor=INK)
+    fig.update_yaxes(showgrid=True, gridcolor=GRID, zeroline=False, linecolor=INK)
+    return fig
+
+
 activity_df = load_data("SELECT * FROM activity_logs ORDER BY id DESC")
 network_df = load_data("SELECT * FROM network_logs ORDER BY id DESC")
 uptime_df = load_data("SELECT * FROM uptime_logs ORDER BY id DESC")
 
-# Calculate Metrics & Uptime
+if not activity_df.empty:
+    activity_df["timestamp"] = pd.to_datetime(activity_df["timestamp"])
+if not network_df.empty:
+    network_df["timestamp"] = pd.to_datetime(network_df["timestamp"])
+
 total_logs = len(activity_df)
-total_data = network_df['mb_used'].sum() if not network_df.empty and 'mb_used' in network_df.columns else 0.0
-unique_apps = activity_df['app_name'].nunique() if not activity_df.empty else 0
+total_mb = float(network_df["mb_used"].sum()) if not network_df.empty else 0.0
+unique_apps = int(activity_df["app_name"].nunique()) if not activity_df.empty else 0
+active_min = float(activity_df["duration_sec"].sum() / 60) if not activity_df.empty else 0.0
 
-# Calculate System Uptime String
-boot_timestamp = psutil.boot_time()
-uptime_seconds = time.time() - boot_timestamp
-uptime_hours = int(uptime_seconds // 3600)
-uptime_mins = int((uptime_seconds % 3600) // 60)
-uptime_str = f"{uptime_hours}h {uptime_mins}m"
+up_sec = time.time() - psutil.boot_time()
+uptime_str = f"{int(up_sec // 3600)}h {int((up_sec % 3600) // 60)}m"
 
-# Interactive Metric Cards Layout with 4 Columns (Including Uptime)
-col1, col2, col3, col4 = st.columns(4)
+# ---------------------------------------------------------------- header
+st.markdown('<p class="lb-title">Laptop <span>Logbook</span></p>', unsafe_allow_html=True)
+st.markdown(
+    '<p class="lb-sub">What the laptop was doing, which apps got the time, and how much data went through.</p>',
+    unsafe_allow_html=True,
+)
 
-with col1:
-    st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-title">Total Activity Logs</div>
-            <div class="metric-value">{total_logs}</div>
+# Right-now strip: the most recent record
+if not activity_df.empty:
+    last = activity_df.iloc[0]
+    st.markdown(
+        f"""
+        <div class="lb-now">
+            <small>Last thing recorded, {last['timestamp']:%d %b %Y, %H:%M:%S}</small>
+            <div class="app">{last['app_name']}</div>
+            <div class="win">{last['window_title'] or ''}</div>
         </div>
-    """, unsafe_allow_html=True)
-    if st.button("🔍 Inspect Activity", use_container_width=True):
-        st.session_state.active_view = 'logs'
+        """,
+        unsafe_allow_html=True,
+    )
+else:
+    st.markdown(
+        '<div class="lb-now"><div class="app">Nothing recorded yet</div>'
+        '<div class="win">Start the tracker and entries will show up here.</div></div>',
+        unsafe_allow_html=True,
+    )
 
-with col2:
-    st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-title">Bandwidth Consumed</div>
-            <div class="metric-value">{total_data:.2f} MB</div>
-        </div>
-    """, unsafe_allow_html=True)
-    if st.button("🌐 Inspect Bandwidth", use_container_width=True):
-        st.session_state.active_view = 'network'
+# Figures
+figs = [
+    (f"{total_logs}", "log entries"),
+    (f"{total_mb:.2f} MB", "data used"),
+    (f"{unique_apps}", "different apps"),
+    (uptime_str, "this machine has been up"),
+]
+for col, (num, label) in zip(st.columns(4), figs):
+    col.markdown(
+        f'<div class="lb-fig"><div class="n">{num}</div><div class="l">{label}</div></div>',
+        unsafe_allow_html=True,
+    )
 
-with col3:
-    st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-title">Active Unique Apps</div>
-            <div class="metric-value">{unique_apps}</div>
-        </div>
-    """, unsafe_allow_html=True)
-    if st.button("📱 Inspect Apps", use_container_width=True):
-        st.session_state.active_view = 'apps'
+st.write("")
 
-with col4:
-    st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-title">System Uptime</div>
-            <div class="metric-value">{uptime_str}</div>
-        </div>
-    """, unsafe_allow_html=True)
-    if st.button("⏱️ Inspect Uptime", use_container_width=True):
-        st.session_state.active_view = 'uptime'
+# ---------------------------------------------------------------- tabs
+tab_over, tab_act, tab_net, tab_apps, tab_up = st.tabs(
+    ["Overview", "Activity", "Network", "Apps", "Uptime"]
+)
 
-st.markdown("<br>", unsafe_allow_html=True)
+with tab_over:
+    st.subheader("Day strip")
+    st.markdown('<p class="lb-note">Each bar is a stretch of time spent in one app.</p>', unsafe_allow_html=True)
+    if not activity_df.empty:
+        strip = activity_df.head(300).copy()
+        strip["end"] = strip["timestamp"] + pd.to_timedelta(strip["duration_sec"], unit="s")
+        fig_tl = px.timeline(
+            strip, x_start="timestamp", x_end="end", y="app_name", color="app_name",
+            color_discrete_sequence=APP_COLORS,
+        )
+        fig_tl.update_yaxes(autorange="reversed", title=None)
+        fig_tl.update_xaxes(title=None)
+        fig_tl.update_layout(showlegend=False)
+        st.plotly_chart(chart_layout(fig_tl, 320), use_container_width=True)
+    else:
+        st.info("No activity yet.")
 
-# Dynamic Display Based on Clicked Card (Toggle views)
-if st.session_state.active_view == 'overview':
-    # Default view showing both charts
-    c_left, c_right = st.columns(2)
-    with c_left:
-        st.subheader("🍩 App Share & Distribution")
+    left, right = st.columns(2)
+    with left:
+        st.subheader("Minutes per app")
         if not activity_df.empty:
-            app_time = activity_df.groupby('app_name')['duration_sec'].sum().reset_index()
-            app_time['time_spent_min'] = round(app_time['duration_sec'] / 60, 2)
-            fig_app = px.pie(
-                app_time.head(6), names='app_name', values='time_spent_min', hole=0.6,
-                template="plotly_dark", color_discrete_sequence=px.colors.qualitative.Pastel
+            per_app = (
+                activity_df.groupby("app_name")["duration_sec"].sum().div(60).round(1)
+                .sort_values().tail(8).reset_index(name="minutes")
             )
-            fig_app.update_traces(textposition='inside', textinfo='percent+label')
-            fig_app.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', margin=dict(t=20, b=20, l=20, r=20), showlegend=False)
-            st.plotly_chart(fig_app, use_container_width=True)
+            fig_bar = px.bar(per_app, x="minutes", y="app_name", orientation="h",
+                             color_discrete_sequence=[COBALT])
+            fig_bar.update_yaxes(title=None)
+            fig_bar.update_xaxes(title="minutes")
+            st.plotly_chart(chart_layout(fig_bar), use_container_width=True)
         else:
-            st.info("Awaiting live activity logs...")
-
-    with c_right:
-        st.subheader("📈 Live Bandwidth Stream")
+            st.info("No activity yet.")
+    with right:
+        st.subheader("Data over time")
         if not network_df.empty:
-            fig_net = px.area(
-                network_df.tail(100), x='timestamp', y='mb_used',
-                template="plotly_dark", color_discrete_sequence=['#6366f1']
-            )
-            fig_net.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', margin=dict(t=20, b=20, l=20, r=20))
-            st.plotly_chart(fig_net, use_container_width=True)
+            net = network_df.sort_values("timestamp").tail(150)
+            fig_net = go.Figure(go.Scatter(
+                x=net["timestamp"], y=net["mb_used"], mode="lines",
+                line=dict(color=INK, width=2, shape="spline"),
+                fill="tozeroy", fillcolor="rgba(255,228,92,0.55)",
+            ))
+            fig_net.update_yaxes(title="MB per reading")
+            st.plotly_chart(chart_layout(fig_net), use_container_width=True)
         else:
-            st.info("Awaiting live network metrics...")
+            st.info("No network data yet.")
 
-elif st.session_state.active_view == 'logs':
-    st.subheader("💻 Detailed Activity Logs Inspection")
-    if st.button("⬅️ Back to Overview"):
-        st.session_state.active_view = 'overview'
-        st.rerun()
+with tab_act:
+    st.subheader("All activity entries")
     if not activity_df.empty:
-        st.dataframe(activity_df, use_container_width=True)
+        st.dataframe(activity_df, use_container_width=True, hide_index=True)
     else:
-        st.warning("No activity records available.")
+        st.info("No activity records.")
 
-elif st.session_state.active_view == 'network':
-    st.subheader("🌐 Detailed Bandwidth & Network Logs Inspection")
-    if st.button("⬅️ Back to Overview"):
-        st.session_state.active_view = 'overview'
-        st.rerun()
+with tab_net:
+    st.subheader("Network readings")
     if not network_df.empty:
-        st.dataframe(network_df, use_container_width=True)
+        st.dataframe(network_df, use_container_width=True, hide_index=True)
     else:
-        st.warning("No network records available.")
+        st.info("No network records.")
 
-elif st.session_state.active_view == 'apps':
-    st.subheader("📱 Unique Applications Analysis")
-    if st.button("⬅️ Back to Overview"):
-        st.session_state.active_view = 'overview'
-        st.rerun()
+with tab_apps:
+    st.subheader("Apps seen so far")
     if not activity_df.empty:
-        unique_app_df = activity_df[['app_name']].drop_duplicates().reset_index(drop=True)
-        st.dataframe(unique_app_df, use_container_width=True)
+        apps = (
+            activity_df.groupby("app_name")
+            .agg(entries=("id", "count"), minutes=("duration_sec", lambda s: round(s.sum() / 60, 1)),
+                 last_seen=("timestamp", "max"))
+            .sort_values("minutes", ascending=False).reset_index()
+        )
+        st.dataframe(apps, use_container_width=True, hide_index=True)
     else:
-        st.warning("No unique apps found.")
+        st.info("No apps recorded.")
 
-elif st.session_state.active_view == 'uptime':
-    st.subheader("⏱️ System Uptime History Inspection")
-    if st.button("⬅️ Back to Overview"):
-        st.session_state.active_view = 'overview'
-        st.rerun()
-    st.markdown(f"### Current Active Session Uptime: {uptime_str}")
+with tab_up:
+    st.subheader("Uptime")
+    st.markdown(f'<p class="lb-note">This machine has been running for {uptime_str}.</p>', unsafe_allow_html=True)
     if not uptime_df.empty:
-        st.dataframe(uptime_df, use_container_width=True)
+        st.dataframe(uptime_df, use_container_width=True, hide_index=True)
     else:
-        st.warning("No uptime records available.")
+        st.info("No uptime records.")
 
-# Bottom Section - Clean & Professional Control Panel
-st.markdown("---")
-st.subheader("🎛️ System Database Control Center")
-st.markdown("<p style='color: #94a3b8; font-size: 14px;'>Manage and purge stored telemetry logs safely from the local SQLite database.</p>", unsafe_allow_html=True)
-
-col_b1, col_b2 = st.columns([1, 2])
-
-with col_b1:
-    if st.button("🗑️ Wipe All Database Logs", use_container_width=True, type="primary"):
-        clear_database()
-        st.success("All database logs cleared successfully!")
-        st.rerun()
-
+# ---------------------------------------------------------------- danger zone
+st.markdown('<div class="lb-danger"></div>', unsafe_allow_html=True)
+st.subheader("Clear the logbook")
+st.markdown('<p class="lb-note">This deletes every stored log. It cannot be undone.</p>', unsafe_allow_html=True)
+sure = st.checkbox("I understand, delete everything")
+if st.button("Delete all logs", disabled=not sure):
+    clear_database()
+    st.success("All logs deleted.")
+    st.rerun()
