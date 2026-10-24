@@ -1,5 +1,4 @@
 psutil
-pywin32
 pygetwindow
 streamlit
 pandas
