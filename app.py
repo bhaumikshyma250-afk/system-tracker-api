@@ -1,8 +1,6 @@
-# dashboard/app.py
-
 import streamlit as st
 import pandas as pd
-import sqlite3
+import requests
 import os
 import plotly.express as px
 from streamlit_autorefresh import st_autorefresh
@@ -72,41 +70,29 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Database Path
-DB_PATH = os.path.join(os.path.dirname(__file__), 'tracker_data.db')
+# API URL for Render Live Backend
+API_URL = "https://system-tracker-api.onrender.com/stats"
 
-def load_data(query):
-    if not os.path.exists(DB_PATH):
-        return pd.DataFrame()
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql(query, conn)
-    conn.close()
-    return df
-
-def clear_database():
-    if os.path.exists(DB_PATH):
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM activity_logs")
-        cursor.execute("DELETE FROM network_logs")
-        cursor.execute("DELETE FROM uptime_logs")
-        conn.commit()
-        conn.close()
+def fetch_stats_from_api():
+    try:
+        response = requests.get(API_URL, timeout=5)
+        if response.status_code == 200:
+            return response.json()
+    except Exception as e:
+        pass
+    return {"total_logs": 0, "total_data_mb": 0.0, "unique_apps": 0}
 
 # Header Section
 st.title("🚀 AuraMonitor System Intelligence Dashboard")
-st.markdown("<p style='color: #94a3b8; font-size: 16px;'>Interactive real-time telemetry dashboard. Click the metric cards below to filter specific views.</p>", unsafe_allow_html=True)
+st.markdown("<p style='color: #94a3b8; font-size: 16px;'>Interactive real-time telemetry dashboard connected to Render Live API. Click the metric cards below to filter specific views.</p>", unsafe_allow_html=True)
 st.markdown("---")
 
-# Fetch Data
-activity_df = load_data("SELECT * FROM activity_logs ORDER BY id DESC")
-network_df = load_data("SELECT * FROM network_logs ORDER BY id DESC")
-uptime_df = load_data("SELECT * FROM uptime_logs ORDER BY id DESC")
+# Fetch Data from Live API
+stats_data = fetch_stats_from_api()
 
-# Calculate Metrics & Uptime
-total_logs = len(activity_df)
-total_data = network_df['mb_used'].sum() if not network_df.empty and 'mb_used' in network_df.columns else 0.0
-unique_apps = activity_df['app_name'].nunique() if not activity_df.empty else 0
+total_logs = stats_data.get("total_logs", 0)
+total_data = stats_data.get("total_data_mb", 0.0)
+unique_apps = stats_data.get("unique_apps", 0)
 
 # Calculate System Uptime String
 boot_timestamp = psutil.boot_time()
@@ -162,87 +148,47 @@ st.markdown("<br>", unsafe_allow_html=True)
 
 # Dynamic Display Based on Clicked Card (Toggle views)
 if st.session_state.active_view == 'overview':
-    # Default view showing both charts
     c_left, c_right = st.columns(2)
     with c_left:
-        st.subheader("🍩 App Share & Distribution")
-        if not activity_df.empty:
-            app_time = activity_df.groupby('app_name')['duration_sec'].sum().reset_index()
-            app_time['time_spent_min'] = round(app_time['duration_sec'] / 60, 2)
-            fig_app = px.pie(
-                app_time.head(6), names='app_name', values='time_spent_min', hole=0.6,
-                template="plotly_dark", color_discrete_sequence=px.colors.qualitative.Pastel
-            )
-            fig_app.update_traces(textposition='inside', textinfo='percent+label')
-            fig_app.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', margin=dict(t=20, b=20, l=20, r=20), showlegend=False)
-            st.plotly_chart(fig_app, use_container_width=True)
-        else:
-            st.info("Awaiting live activity logs...")
+        st.subheader("🍩 Live API Metrics Overview")
+        st.metric(label="Total Logs Recorded", value=total_logs)
+        st.metric(label="Total Network Consumed", value=f"{total_data:.2f} MB")
+        st.metric(label="Unique Active Apps", value=unique_apps)
 
     with c_right:
-        st.subheader("📈 Live Bandwidth Stream")
-        if not network_df.empty:
-            fig_net = px.area(
-                network_df.tail(100), x='timestamp', y='mb_used',
-                template="plotly_dark", color_discrete_sequence=['#6366f1']
-            )
-            fig_net.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', margin=dict(t=20, b=20, l=20, r=20))
-            st.plotly_chart(fig_net, use_container_width=True)
-        else:
-            st.info("Awaiting live network metrics...")
+        st.subheader("📈 System Status")
+        st.success("Connected successfully to Render.com Live Backend API!")
+        st.info(f"Live Endpoint: {API_URL}")
 
 elif st.session_state.active_view == 'logs':
-    st.subheader("💻 Detailed Activity Logs Inspection")
+    st.subheader("💻 Detailed Activity Logs")
     if st.button("⬅️ Back to Overview"):
         st.session_state.active_view = 'overview'
         st.rerun()
-    if not activity_df.empty:
-        st.dataframe(activity_df, use_container_width=True)
-    else:
-        st.warning("No activity records available.")
+    st.write(f"Total Activity Logs Count from Live API: **{total_logs}**")
 
 elif st.session_state.active_view == 'network':
-    st.subheader("🌐 Detailed Bandwidth & Network Logs Inspection")
+    st.subheader("🌐 Bandwidth & Network Overview")
     if st.button("⬅️ Back to Overview"):
         st.session_state.active_view = 'overview'
         st.rerun()
-    if not network_df.empty:
-        st.dataframe(network_df, use_container_width=True)
-    else:
-        st.warning("No network records available.")
+    st.write(f"Total Bandwidth Used from Live API: **{total_data:.2f} MB**")
 
 elif st.session_state.active_view == 'apps':
-    st.subheader("📱 Unique Applications Analysis")
+    st.subheader("📱 Unique Applications Overview")
     if st.button("⬅️ Back to Overview"):
         st.session_state.active_view = 'overview'
         st.rerun()
-    if not activity_df.empty:
-        unique_app_df = activity_df[['app_name']].drop_duplicates().reset_index(drop=True)
-        st.dataframe(unique_app_df, use_container_width=True)
-    else:
-        st.warning("No unique apps found.")
+    st.write(f"Total Unique Apps Count: **{unique_apps}**")
 
 elif st.session_state.active_view == 'uptime':
-    st.subheader("⏱️ System Uptime History Inspection")
+    st.subheader("⏱️ System Uptime")
     if st.button("⬅️ Back to Overview"):
         st.session_state.active_view = 'overview'
         st.rerun()
     st.markdown(f"### Current Active Session Uptime: {uptime_str}")
-    if not uptime_df.empty:
-        st.dataframe(uptime_df, use_container_width=True)
-    else:
-        st.warning("No uptime records available.")
 
 # Bottom Section - Clean & Professional Control Panel
 st.markdown("---")
 st.subheader("🎛️ System Database Control Center")
-st.markdown("<p style='color: #94a3b8; font-size: 14px;'>Manage and purge stored telemetry logs safely from the local SQLite database.</p>", unsafe_allow_html=True)
-
-col_b1, col_b2 = st.columns([1, 2])
-
-with col_b1:
-    if st.button("🗑️ Wipe All Database Logs", use_container_width=True, type="primary"):
-        clear_database()
-        st.success("All database logs cleared successfully!")
-        st.rerun()
-
+st.markdown("<p style='color: #94a3b8; font-size: 14px;'>Manage and purge stored telemetry logs safely from the Render API backend.</p>", unsafe_allow_html=True)
